@@ -315,5 +315,23 @@ void forget() {
     subscribed = false;
 }
 void stop() { stopping = true; esp_ble_gap_stop_advertising(); if (connected) esp_ble_gap_disconnect(peer); }
+// Drops the link but keeps advertising, so a new host can pair afterwards.
+void disconnectPeer() { if (connected) esp_ble_gap_disconnect(peer); }
+int bonds() { return esp_ble_get_bond_device_num(); }
+bool peerText(char* out, unsigned size) {
+    esp_bd_addr_t address{};
+    if (connected) {
+        std::memcpy(address, peer, 6);
+    } else {
+        int count = esp_ble_get_bond_device_num();
+        if (count <= 0) return false;
+        std::vector<esp_ble_bond_dev_t> list(count);
+        if (esp_ble_get_bond_device_list(&count, list.data()) != ESP_OK || count <= 0) return false;
+        std::memcpy(address, list[0].bd_addr, 6);
+    }
+    std::snprintf(out, size, "%02X:%02X:%02X:%02X:%02X:%02X", address[0], address[1], address[2],
+                  address[3], address[4], address[5]);
+    return true;
+}
 void battery(uint8_t level) { if (device) esp_hidd_dev_battery_set(device, level); }
 }

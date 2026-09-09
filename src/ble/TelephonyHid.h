@@ -12,6 +12,9 @@ esp_err_t send(uint8_t value);
 void confirm(bool accept);
 void forget();
 void stop();
+void disconnectPeer();
+int bonds();
+bool peerText(char* out, unsigned size);
 void battery(uint8_t level);
 }
 

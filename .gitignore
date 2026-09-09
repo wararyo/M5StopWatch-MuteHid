@@ -6,3 +6,5 @@ sdkconfig.*
 __pycache__/
 .venv/
 
+
+src/ui/generated/
