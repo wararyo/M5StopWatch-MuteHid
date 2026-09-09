@@ -35,7 +35,7 @@ pio run -e m5stopwatch-coexist -t backup  # 16 MB全体のバックアップ
 python tools/device.py update --execute
 ```
 
-> **`pio run -t upload` と `-t erase` は使わないでください。** uploadはアプリを `0x10000` から書くためUserDemo（ota_0）を破壊し、eraseはBLEボンドと共有設定を含むNVSごと消します。`tools/upload_guard.py` がこれらのターゲットを停止します。
+> **共存させる場合、`pio run -t upload` と `-t erase` は使わないでください。** uploadはアプリを `0x10000` から書くためUserDemo（ota_0）を破壊し、eraseはBLEボンドと共有設定を含むNVSごと消します。`tools/upload_guard.py` が共存env（`m5stopwatch-coexist`）でこれらのターゲットを停止します。単独env（`m5stopwatch`）では、デバイス全体をMuteHid専用にする前提でuploadを許可しています。
 
 `update` は既にota_1にMuteHidが入っている場合の更新用で、実機の保護領域だけをバックアップと照合します。初回は `tools/device.py install --execute` を使い、こちらはFlash全体がバックアップと一致することを確認します（`--backup` を省くと16 MBを読み出して新しいバックアップを作ります）。Flashの全消去や共存レイアウトの新規構築は実装していません。
 
