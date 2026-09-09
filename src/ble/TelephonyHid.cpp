@@ -13,6 +13,7 @@
 #include "esp_hidd.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "nvs.h"
 
 namespace {
 constexpr const char* Tag = "Telephony";
@@ -44,13 +45,71 @@ void advertise() {
         ESP_LOGI(Tag, "ADV request=%s", esp_err_to_name(err));
     }
 }
-bool allowedPeer(const uint8_t* address) {
+bool bondedPeer(const uint8_t* address) {
     int count = esp_ble_get_bond_device_num();
-    if (!count) return true;
+    if (count <= 0) return false;
     std::vector<esp_ble_bond_dev_t> bonds(count);
     if (esp_ble_get_bond_device_list(&count, bonds.data()) != ESP_OK) return false;
     for (const auto& b : bonds) if (!std::memcmp(b.bd_addr, address, 6)) return true;
     return false;
+}
+bool allowedPeer(const uint8_t* address) {
+    return esp_ble_get_bond_device_num() <= 0 || bondedPeer(address);
+}
+
+// A bonded host writes the Input CCCD once and then expects the server to keep
+// it across reboots, so the subscription has to live in NVS next to the bond.
+constexpr const char* Namespace = "mutehid";
+constexpr const char* SubscriptionKey = "input_ccc";
+struct Subscription { esp_bd_addr_t address; uint16_t value; };
+
+bool loadSubscription(Subscription& record) {
+    nvs_handle_t nvs;
+    if (nvs_open(Namespace, NVS_READONLY, &nvs) != ESP_OK) return false;
+    size_t size = sizeof(record);
+    const auto err = nvs_get_blob(nvs, SubscriptionKey, &record, &size);
+    nvs_close(nvs);
+    return err == ESP_OK && size == sizeof(record);
+}
+void saveSubscription(const uint8_t* address, uint16_t value) {
+    Subscription record{};
+    std::memcpy(record.address, address, 6);
+    record.value = value;
+    nvs_handle_t nvs;
+    auto err = nvs_open(Namespace, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_set_blob(nvs, SubscriptionKey, &record, sizeof(record));
+        if (err == ESP_OK) err = nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    ESP_LOGI(Tag, "CCC store value=0x%04x result=%s", value, esp_err_to_name(err));
+}
+void clearSubscription() {
+    nvs_handle_t nvs;
+    if (nvs_open(Namespace, NVS_READWRITE, &nvs) != ESP_OK) return;
+    const auto err = nvs_erase_key(nvs, SubscriptionKey);
+    if (err == ESP_OK) nvs_commit(nvs);
+    nvs_close(nvs);
+    ESP_LOGI(Tag, "CCC cleared result=%s", esp_err_to_name(err));
+}
+void restoreSubscription(const uint8_t* address) {
+    Subscription record{};
+    if (!loadSubscription(record)) { ESP_LOGI(Tag, "CCC none stored"); return; }
+    // Accept the stored peer itself, or the record of the still-bonded host when
+    // the connection reports a different (private) address for it.
+    if (std::memcmp(record.address, address, 6) && !bondedPeer(record.address)) {
+        ESP_LOGW(Tag, "CCC stored for another peer; not restored");
+        return;
+    }
+    if (!(record.value & 0x0001)) { ESP_LOGI(Tag, "CCC stored as disabled"); return; }
+    subscribed = true;
+    if (cccHandle) {
+        const uint8_t value[2] = {0x01, 0x00};
+        const auto err = esp_ble_gatts_set_attr_value(cccHandle, 2, value);
+        if (err != ESP_OK) ESP_LOGW(Tag, "CCC attribute update: %s", esp_err_to_name(err));
+    }
+    ESP_LOGI(Tag, "SUBSCRIBE restored=1 from bond");
+    emit(telephony::Kind::Subscribe, 1);
 }
 void gap(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* p) {
     switch (event) {
@@ -78,7 +137,8 @@ void gap(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* p) {
         ESP_LOGI(Tag, "AUTH success=%d reason=0x%02x mode=0x%02x bonds=%d", (int)encrypted.load(),
                  p->ble_security.auth_cmpl.fail_reason, p->ble_security.auth_cmpl.auth_mode, esp_ble_get_bond_device_num());
         emit(telephony::Kind::Auth, encrypted ? 1 : 0);
-        if (!encrypted) esp_ble_gap_disconnect(peer);
+        if (encrypted) restoreSubscription(p->ble_security.auth_cmpl.bd_addr);
+        else esp_ble_gap_disconnect(peer);
         break;
     case ESP_GAP_BLE_REMOVE_BOND_DEV_COMPLETE_EVT:
         ESP_LOGI(Tag, "BOND remove status=%d remaining=%d", p->remove_bond_dev_cmpl.status, esp_ble_get_bond_device_num()); break;
@@ -123,9 +183,13 @@ void gatts(esp_gatts_cb_event_t event, esp_gatt_if_t iface, esp_ble_gatts_cb_par
                 ESP_LOGW(Tag, "Ignoring malformed/long write");
                 return; // Prevent the SDK's unchecked value[0] access.
             }
-            if (w.handle == cccHandle && w.len == 2 && encrypted) {
+            if (w.handle == cccHandle && w.len == 2) {
+                // The descriptor already requires an encrypted link, so gating on
+                // this task's view of encryption would only drop a host write that
+                // arrives before the authentication event is dispatched.
                 subscribed = w.value[0] == 1 && w.value[1] == 0;
                 ESP_LOGI(Tag, "SUBSCRIBE input=%d", (int)subscribed.load());
+                saveSubscription(peer, static_cast<uint16_t>(w.value[0] | (w.value[1] << 8)));
                 emit(telephony::Kind::Subscribe, subscribed ? 1 : 0);
             } else if (w.handle == outputHandle) {
                 ESP_LOGI(Tag, "OUTPUT id=1 len=%u value=0x%02x", w.len, w.value[0]);
@@ -247,6 +311,8 @@ void forget() {
     std::vector<esp_ble_bond_dev_t> bonds(count);
     if (count && esp_ble_get_bond_device_list(&count, bonds.data()) == ESP_OK)
         for (const auto& b : bonds) { esp_bd_addr_t address; std::memcpy(address, b.bd_addr, 6); esp_ble_remove_bond_device(address); }
+    clearSubscription();
+    subscribed = false;
 }
 void stop() { stopping = true; esp_ble_gap_stop_advertising(); if (connected) esp_ble_gap_disconnect(peer); }
 void battery(uint8_t level) { if (device) esp_hidd_dev_battery_set(device, level); }
