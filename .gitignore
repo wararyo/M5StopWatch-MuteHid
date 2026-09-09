@@ -1,0 +1,8 @@
+.pio/
+sdkconfig
+sdkconfig.old
+sdkconfig.*
+!sdkconfig.defaults
+__pycache__/
+.venv/
+

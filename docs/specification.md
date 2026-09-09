@@ -1,6 +1,8 @@
 # M5StopWatch-MuteHid アプリ仕様書
 
-作成日: 2026-09-09 / 版: 0.1（実装前ドラフト）
+作成日: 2026-09-09 / 版: 0.2（Phase 0着手）
+
+2026-09-09の変更: ユーザー指定によりmacOSを当面の要件・検証対象から除外。Windows 11を対象とする。Phase 0の実測結果は[検証記録](phase0-results.md)で管理する。
 
 ## 1. 目的と実現性
 
@@ -8,7 +10,7 @@ M5StopWatchをBluetooth接続のマイクミュートコントローラーとし
 
 第一候補は **BLE HID over GATT Profile（HOGP）上のHID Telephony Device**。PCに専用ソフトを追加しない利用を目指す。ただし、HIDとしてOSに認識されても、会議アプリがその入力と出力に対応するとは限らない。
 
-**現時点でWindows/macOS版Google Meetでの双方向動作は保証できない。** Google公式ヘルプは、通話コントロールをChromium系ブラウザに限定し、Bluetoothでの対応をChromeOSのみとしている。USB参考実装があることは、Windows/macOSのBluetooth対応の根拠にはならない。このため、最初に互換性PoCを行い、通常利用版の成立可否を判断する。[S1][S2]
+**現時点でWindows版Google Meetでの双方向動作は保証できない。** Google公式ヘルプは、通話コントロールをChromium系ブラウザに限定し、Bluetoothでの対応をChromeOSのみとしている。USB参考実装があることは、WindowsのBluetooth対応の根拠にはならない。このため、最初に互換性PoCを行い、通常利用版の成立可否を判断する。[S1][S2]
 
 ここでいう「PCのミュート状態」は、連携中の会議アプリがHIDへ通知した状態を指す。OS全体の録音デバイスのミュート、他の会議アプリ、マイク本体の物理スイッチと一致する保証はない。
 
@@ -17,14 +19,14 @@ M5StopWatchをBluetooth接続のマイクミュートコントローラーとし
 | ID | 要求 | 優先度・扱い |
 |---|---|---|
 | R1 | KantanPlayを基にした技術スタック | 必須 |
-| R2 | Windows/macOSでBLE HID Telephonyとして列挙・接続できる | 必須、PoCで判定 |
+| R2 | WindowsでBLE HID Telephonyとして列挙・接続できる | 必須、PoCで判定 |
 | R3 | StopWatchから会議アプリのミュートを切り替える | 必須、環境別に判定 |
 | R4 | 会議アプリ側のミュート変更をStopWatchへ反映 | 最優先の実現目標、未対応環境を明示 |
 | R5 | Material Design Iconsのマイクアイコンを使用 | 必須 |
 | R6 | UserDemoと共存し相互に起動を切り替える | 推奨、初期設計に含める |
 | R7 | ペアリング情報を保持し再接続する | 必須 |
 
-初期対象はWindows 11およびmacOSの検証機、Google Meet＋Chrome。OS・ブラウザの正確なバージョンは検証時に記録する。Edge、Teams、Zoomは追加の互換性確認対象とし、一つの環境の成功を他へ一般化しない。SafariはMeetの公式通話コントロール対象に含めない。[S1]
+初期対象はWindows 11の検証機、Google Meet＋Chrome。OS・ブラウザの正確なバージョンは検証時に記録する。Edge、Teams、Zoomは追加の互換性確認対象とし、一つの環境の成功を他へ一般化しない。macOSとSafariは当面の対象外とする。[S1]
 
 初期版では音声送受信、Bluetoothヘッドセット機能、録音、複数PCの同時接続、押している間だけ解除するPTT、キーボードショートカット代替を含めない。USBは給電・書き込み・ログ取得に使用する。USB HIDへの変更やPC常駐ソフトはPoC不成立時の別案とする。
 
@@ -197,16 +199,15 @@ NVSは16 KBしかないため、アプリ設定とBLEボンドを含めた容量
 
 ### Phase 0: 通信だけのPoC
 
-最小画面とBLE TelephonyのInput/Outputを実装し、まずWindows/macOSで列挙、通知購読、ホストからのOutput書き込みを検証する。診断用ホストから書けることと、Meetが自動で書くことを区別する。
+最小画面とBLE TelephonyのInput/Outputを実装し、まずWindowsで列挙、通知購読、ホストからのOutput書き込みを検証する。診断用ホストから書けることと、Meetが自動で書くことを区別する。
 
 Meetでは、利用可能なら設定→音声→通話コントロールからデバイス接続・ブラウザ権限付与を行う。候補に表示されない場合はその結果を記録し、成功扱いにしない。[S1]
 
 | 環境 | HID列挙 | デバイス選択 | 本体→会議 | 会議→本体 | 判定 |
 |---|---|---|---|---|---|
 | Windows 11 / Chrome / Meet / BLE直結 | 未検証 | 未検証 | 未検証 | 未検証 | 公式Bluetooth対応範囲外 |
-| macOS / Chrome / Meet / BLE直結 | 未検証 | 未検証 | 未検証 | 未検証 | 公式Bluetooth対応範囲外 |
 | Windows 11 / Edge / Meet / BLE直結 | 未検証 | 未検証 | 未検証 | 未検証 | 追加確認 |
-| Windows/macOS / Teams・Zoom | 未検証 | 対象アプリの設定で確認 | 未検証 | 未検証 | アプリごとに記録 |
+| Windows / Teams・Zoom | 未検証 | 対象アプリの設定で確認 | 未検証 | 未検証 | アプリごとに記録 |
 
 検証記録にはOSビルド、ブラウザ・会議アプリ版、Bluetoothアダプター、ファームウェア版、Report Map、PnP ID、権限設定、送受信ログを含める。
 
@@ -235,7 +236,7 @@ PoCで実用的な入力経路が確認できたら通常画面と状態管理�
 
 ### PoC不成立時
 
-Windows/macOS＋Meetで本体から操作できなければ、BLE直結方式では主要用途未達と記録する。UIだけを完成させて対応済みにしない。次の案を具体的な追加仕様として比較する。
+Windows＋Meetで本体から操作できなければ、BLE直結方式では主要用途未達と記録する。UIだけを完成させて対応済みにしない。次の案を具体的な追加仕様として比較する。
 
 1. PC常駐ソフト／ブラウザ拡張を介する方式。会議アプリ状態の取得と操作経路の両方が必要。OS入力デバイスのミュートだけを変更しても同等とは扱わない。
 2. BLEとUSB HIDを中継する外付け受信機。PCにはUSB Telephonyとして接続し、本体との無線通信と出力の返送を行う。追加ハードウェアが必要。
@@ -245,7 +246,7 @@ Windows/macOS＋Meetで本体から操作できなければ、BLE直結方式で
 
 ## 10. 実装前に確定する事項
 
-1. Windows/macOSでのBLE Telephony列挙とMeetへの入出力の成立可否。
+1. WindowsでのBLE Telephony列挙とMeetへの入出力の成立可否。
 2. Phone Muteの状態値／トグル解釈と、最終Report Map。
 3. BLE PnP IDとして使用可能なVID/PIDとメーカー識別文字列。
 4. 実機のOS・ブラウザの検証対象バージョン。
