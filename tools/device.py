@@ -51,6 +51,35 @@ def app_name(data):
     return data[80:112].split(b"\0", 1)[0].decode(errors="replace")
 
 
+def detect_port():
+    """The one Espressif USB serial device, when there is no doubt about it."""
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        raise ValueError("Pass --port; pyserial is not available for detection")
+    ports = list(list_ports.comports())
+    espressif = [port for port in ports if port.vid == 0x303A]
+    for candidates in (espressif, ports):
+        if len(candidates) == 1:
+            print(f"Port: {candidates[0].device} ({candidates[0].description})")
+            return candidates[0].device
+    listing = ", ".join(f"{port.device} ({port.description})" for port in ports) or "none found"
+    raise ValueError(f"Pass --port; visible ports: {listing}")
+
+
+def find_backup(directory):
+    """The full backup an update verifies against, when exactly one is stored."""
+    candidates = sorted(path for path in directory.glob("before-*.bin")
+                        if path.with_suffix(".sha256").exists())
+    if len(candidates) == 1:
+        print(f"Backup: {candidates[0].name}")
+        return candidates[0]
+    if not candidates:
+        raise ValueError("No full backup in .pio/phase0/backups; run the backup action first")
+    listing = ", ".join(path.name for path in candidates)
+    raise ValueError(f"Pass --backup; several are stored: {listing}")
+
+
 def ota_selection(slot):
     # Same CRC convention as ESP-IDF components/app_update/otatool.py.
     seq = struct.pack("<I", slot + 1)
@@ -61,14 +90,22 @@ def ota_selection(slot):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("action", choices=["backup", "install", "update"])
-    p.add_argument("--port", required=True)
+    p.add_argument("--port", help="Serial port; detected automatically when omitted")
     p.add_argument("--baud", type=int, default=1500000)
     p.add_argument("--firmware", type=Path, default=ROOT / ".pio/build/m5stopwatch-coexist/firmware.bin")
     p.add_argument("--esptool", type=Path, default=Path.home() / ".platformio/packages/tool-esptoolpy/esptool.py")
     p.add_argument("--boot", action="store_true", help="Also select ota_1 after successful verification")
-    p.add_argument("--backup", type=Path, help="Reuse a full backup only after SHA256 and live Flash verification")
+    p.add_argument("--backup", type=Path,
+                   help="Full backup to verify against; the stored one is used when omitted")
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
+    if not args.esptool.exists():
+        raise ValueError(f"No esptool.py at {args.esptool}; pass --esptool")
+    args.port = args.port or detect_port()
+    directory = ROOT / ".pio/phase0/backups"
+    directory.mkdir(parents=True, exist_ok=True)
+    if args.action == "update" and not args.backup:
+        args.backup = find_backup(directory)
     if args.action in ("install", "update"):
         fw = args.firmware.read_bytes()
         if not (0 < len(fw) <= SLOT_SIZE) or app_name(fw) != "M5StopWatch-MuteHid":
@@ -81,12 +118,8 @@ def main():
     base = [sys.executable, str(args.esptool), "--chip", "esp32s3", "--port", args.port, "--baud", str(args.baud)]
     def run(*tail):
         subprocess.run(base + list(map(str, tail)), check=True)
-    directory = ROOT / ".pio/phase0/backups"
-    directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     backup = args.backup or directory / f"before-phase0-{stamp}.bin"
-    if args.action == "update" and not args.backup:
-        raise ValueError("update requires the original full backup via --backup")
     if not args.backup:
         run("--after", "no_reset", "read_flash", "0", hex(SIZE), backup)
     data = backup.read_bytes()

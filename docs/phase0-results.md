@@ -28,7 +28,7 @@
 | PROJECT_VER | `0.0.1-phase0` |
 | 双方向動作・往復時間を測定したビルド | commit `6f9e2c5`（CCCD永続化の修正前） |
 | 現在ota_1へ書き込み済みのビルド | commit `9deb88b`（CCCD永続化あり）、1,016,592 bytes、SHA256 `edae3c1adf75dc901b8dade0577e438dbc5a05121d8e09928fff25c2f8dd5b8b` |
-| 書き込み方法 | `tools/device.py update`（ota_1のみ、全体バックアップとの照合あり、`0x00510000`へ verify OK） |
+| 書き込み方法 | `pio run -e m5stopwatch-coexist -t update`（`tools/device.py update`を呼ぶ。ポートと保存済みバックアップは自動解決、ota_1のみ書き換え、`0x00510000`へ verify OK） |
 
 ## 3. HID構成
 
