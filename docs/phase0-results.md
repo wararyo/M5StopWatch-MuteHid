@@ -60,15 +60,22 @@ Input・Outputともに1バイト、Report ID 1。実体は`src/ble/ReportMap.h`
 
 ### PnP ID
 
+Phase 0の測定時は次の実験値だった。
+
 | 項目 | 値 |
 |---|---|
-| Vendor ID | `0x0000`（実験用の未割り当て。配布不可） |
-| Product ID | `0x0000`（同上） |
+| Vendor ID / Product ID | `0x0000` / `0x0000`（未割り当て） |
 | Version | `0x0001` |
 | Manufacturer | `MuteHid Phase0 (unassigned IDs)` |
 | Device Name | `M5StopWatch MuteHid` |
 
-ゼロIDのままでもWindowsは列挙し、Meetも候補として扱った。仕様書§4.4の正式なID選定は未着手。
+ゼロIDのままでもWindowsは列挙し、Meetも候補として扱った。一方、ChromeのWebHIDデバイス選択画面では **「不明なデバイス (0000:0000)」** と表示された。Chromeは製品名が空のときにこの形式へフォールバックする。
+
+2026-09-10に仕様書§4.4のとおりV-USB共有ID `0x16C0`/`0x05DF` へ変更し、Manufacturer Name Stringを`wararyo(contact@wararyo.com)`、Model Number String（`0x2A24`、ESP-IDFにはないため属性テーブルのラップで追加）を`M5StopWatch MuteHid`とした。ESP-IDFの`ble_hidd.c`はDISにPnP ID・Manufacturer Name・Serial Numberのみを載せ、Vendor ID Sourceは`0x02`（USB-IF）固定であることをソースで確認した。再ペアリング後のChrome WebHIDデバイス選択画面は **「不明なデバイス (16C0:05DF)」** になった。識別子は反映されたが、製品名は空のままである。
+
+これはChromiumのWindows実装の制約で、デバイス側では解決できない。ChromiumはWindowsで`HidD_GetProductString`を使って製品名を取得するが、この API はBLE HIDデバイスに対応していない。名前を出すにはChromiumが`Windows.Devices.Bluetooth`から取得するよう変更する必要がある。[S8]
+
+したがってWindows + ChromeのWebHID選択画面では、当面VID/PIDが唯一の識別材料になる。追加したModel Number Stringはこの表示には効かないが、DISとして正しい内容であり、他のホストや将来のChromiumが利用しうるため残す。
 
 ### GATTハンドル（この構成での実測値）
 
@@ -193,3 +200,4 @@ W (91883) BT_HCI: hcif disc complete: hdl 0x1, rsn 0x13
 - Edge、Teams、Zoomでの同じ4項目。
 - 長時間接続（仕様書§9 Phase 1の1時間試験）とスリープ復帰の挙動。
 - Report Mapを変更した場合のWindows側キャッシュの影響（再ペアリングの要否）。
+- Meetの通話コントロールでの表示名（WebHIDと同じ制約を受けるかどうか）。

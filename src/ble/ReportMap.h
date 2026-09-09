@@ -14,10 +14,12 @@ inline constexpr uint8_t ReportMap[] = {
     0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x03,
     0x91, 0x02, 0x75, 0x05, 0x95, 0x01, 0x91, 0x03, 0xc0
 };
-// No allocated identity is claimed by this private experiment. Override only
-// after choosing usable PnP IDs; do not distribute the zero-ID PoC as a product.
-constexpr uint16_t VendorId = 0x0000;
-constexpr uint16_t ProductId = 0x0000;
+// V-USB's shared IDs for generic HID devices that are told apart by their
+// strings, not by the identifiers. Using them obliges us to keep a contact we
+// control in the manufacturer string and a unique model string; both live in
+// TelephonyHid.cpp. The IDF publishes these with Vendor ID Source 0x02 (USB-IF).
+constexpr uint16_t VendorId = 0x16C0;
+constexpr uint16_t ProductId = 0x05DF;
 constexpr uint16_t Version = 0x0001;
 }
 

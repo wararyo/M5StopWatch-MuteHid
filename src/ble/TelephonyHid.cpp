@@ -35,6 +35,16 @@ uint8_t serviceUuid[] = {0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80,
                          0x00, 0x10, 0x00, 0x00, 0x12, 0x18, 0x00, 0x00};
 esp_ble_adv_params_t advertising{};
 
+// Device identity. The shared PnP IDs require these strings to carry a contact
+// the owner controls and a model name unique within it.
+char manufacturerName[] = "wararyo(contact@wararyo.com)";
+char modelNumber[] = "M5StopWatch MuteHid";
+// The IDF's Device Information Service has no Model Number String; hosts that
+// name a HID device from it would otherwise see no product name at all.
+uint16_t characterDeclarationUuid = ESP_GATT_UUID_CHAR_DECLARE;
+uint16_t modelNumberUuid = ESP_GATT_UUID_MODEL_NUMBER_STR;
+uint8_t characteristicReadable = ESP_GATT_CHAR_PROP_BIT_READ;
+
 void emit(telephony::Kind kind, uint32_t value = 0, uint16_t len = 0, uint16_t id = 0) {
     telephony::Event e{kind, generation.load(), value, len, id};
     if (xQueueSend(events, &e, 0) != pdTRUE) lost.store(true);
@@ -208,10 +218,41 @@ void hidEvent(void*, esp_event_base_t, int32_t id, void*) {
 }
 }
 
+namespace {
+bool declares(const esp_gatts_attr_db_t* db, uint16_t count, uint16_t service) {
+    return count && db[0].att_desc.length == 2 && db[0].att_desc.value[0] == (service & 0xff) &&
+           db[0].att_desc.value[1] == (service >> 8);
+}
+void describe(esp_gatts_attr_db_t& record, uint16_t& uuid, uint16_t length, uint8_t* value) {
+    record.attr_control.auto_rsp = ESP_GATT_AUTO_RSP;
+    record.att_desc.uuid_length = ESP_UUID_LEN_16;
+    record.att_desc.uuid_p = reinterpret_cast<uint8_t*>(&uuid);
+    record.att_desc.perm = ESP_GATT_PERM_READ;
+    record.att_desc.max_length = length;
+    record.att_desc.length = length;
+    record.att_desc.value = value;
+}
+}
+
 extern "C" esp_err_t __real_esp_ble_gatts_create_attr_tab(const esp_gatts_attr_db_t*, esp_gatt_if_t, uint16_t, uint8_t);
 extern "C" esp_err_t __wrap_esp_ble_gatts_create_attr_tab(const esp_gatts_attr_db_t* db, esp_gatt_if_t iface, uint16_t count, uint8_t instance) {
+    // Append the Model Number String the IDF leaves out. The table is copied
+    // into a static buffer because the stack keeps reading it after this call.
+    if (declares(db, count, 0x180a)) {
+        static esp_gatts_attr_db_t extended[12];
+        constexpr uint16_t extra = 2;
+        if (count + extra <= sizeof(extended) / sizeof(extended[0])) {
+            std::memcpy(extended, db, count * sizeof(esp_gatts_attr_db_t));
+            describe(extended[count], characterDeclarationUuid, 1, &characteristicReadable);
+            describe(extended[count + 1], modelNumberUuid,
+                     static_cast<uint16_t>(std::strlen(modelNumber)), reinterpret_cast<uint8_t*>(modelNumber));
+            ESP_LOGI(Tag, "DIS model=\"%s\" appended", modelNumber);
+            return __real_esp_ble_gatts_create_attr_tab(extended, iface, count + extra, instance);
+        }
+        ESP_LOGW(Tag, "Device information table too large; model number omitted");
+    }
     // Inspect UUIDs rather than relying on private IDF database offsets.
-    if (count && db[0].att_desc.length == 2 && db[0].att_desc.value[0] == 0x12 && db[0].att_desc.value[1] == 0x18) {
+    if (declares(db, count, 0x1812)) {
         int lastReport = -1, lastCcc = -1;
         for (int i = 0; i < count; ++i) {
             const auto& a = db[i].att_desc;
@@ -271,7 +312,7 @@ esp_err_t begin() {
     esp_hid_device_config_t cfg{};
     cfg.vendor_id = VendorId; cfg.product_id = ProductId; cfg.version = Version;
     cfg.device_name = "M5StopWatch MuteHid";
-    cfg.manufacturer_name = "MuteHid Phase0 (unassigned IDs)";
+    cfg.manufacturer_name = manufacturerName;
     cfg.serial_number = serial;
     cfg.report_maps = maps; cfg.report_maps_len = 1;
     auto* parsed = esp_hid_parse_report_map(ReportMap, sizeof(ReportMap));
@@ -287,7 +328,8 @@ esp_err_t begin() {
     }
     esp_hid_free_report_map(parsed);
     if (!input || !output) return ESP_ERR_INVALID_SIZE;
-    ESP_LOGI(Tag, "IDENTITY experimental VID=%04x PID=%04x version=%04x bonds=%d", VendorId, ProductId, Version, esp_ble_get_bond_device_num());
+    ESP_LOGI(Tag, "IDENTITY VID=%04x PID=%04x version=%04x model=\"%s\" bonds=%d", VendorId, ProductId,
+             Version, modelNumber, esp_ble_get_bond_device_num());
     CHECK(esp_hidd_dev_init(&cfg, ESP_HID_TRANSPORT_BLE, hidEvent, &device));
 #undef CHECK
     return ESP_OK;

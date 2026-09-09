@@ -98,11 +98,23 @@ Outputの実測値は`0x02`／`0x03`で、bit 0がミュート、bit 1（Off-Hoo
 
 BLEでもDevice InformationのPnP IDを設計対象とする。「USB端子を使わないのでVID/PIDは不要」とは決めない。USB VID由来の値を使う場合、Vendor ID SourceはUSB-IFを示す`0x02`とし、Bluetooth SIGのCompany Identifierと混同しない。採用するHOGP版とESP-IDF実装に照らして検証する。[S5]
 
-V-USBの共有ID表では、名前で区別する汎用HID用の **VID `0x16C0` / PID `0x05DF`** が用途上の候補となる。ただし同資料はUSBデバイスの条件であり、BLEのPnP IDへの転用可否は確定していない。BLE用の正式採用はこの点を確認してからとする。[S6]
+V-USBの共有ID表にある、名前で区別する汎用HID用の **VID `0x16C0` / PID `0x05DF`** を採用する。同資料はUSBデバイスを想定した条件であり、BLEのPnP IDへ転用した事例としての正当性は保証されないが、名前で区別するという同じ前提を満たす形で使用する。[S6]
 
-候補の条件として、管理下にあるドメインまたはメールアドレスを含むメーカー文字列、メーカー内で一意の製品文字列、標準クラスドライバの使用が必要。アプリが識別するときはVID/PIDだけでなく文字列も照合する。USBで使用する場合は英語（0x0409）文字列の条件も満たす。メーカー識別文字列は実装時に設定する未確定値とし、架空の所有ドメインを入れない。[S6]
+条件として、管理下にあるドメインまたはメールアドレスを含むメーカー文字列、メーカー内で一意の製品文字列、標準クラスドライバの使用が必要。採用値は次のとおり。
 
-参考実装や市販会議デバイスのVID/PIDをコピーしない。PoCで使用した識別値と、配布版に採用する値を記録する。
+| 項目 | 値 |
+|---|---|
+| Vendor ID / Product ID | `0x16C0` / `0x05DF` |
+| Vendor ID Source | `0x02`（USB-IF）。ESP-IDFの`ble_hidd.c`が固定値で発行する |
+| Manufacturer Name String（`0x2A29`） | `wararyo(contact@wararyo.com)` |
+| Model Number String（`0x2A24`） | `M5StopWatch MuteHid` |
+| Serial Number String（`0x2A25`） | 本体BD_ADDRの16進表記 |
+
+ESP-IDFのDevice Information ServiceはModel Number Stringを持たないため、属性テーブル生成をラップして追加する。ホストがHIDの製品名をどこから得るかは環境依存であり、追加の効果は実測で確認する。アプリが識別するときはVID/PIDだけでなく文字列も照合する。USBで使用する場合は英語（0x0409）文字列の条件も満たす。[S6]
+
+参考実装や市販会議デバイスのVID/PIDをコピーしない。識別値を変更した場合、Windowsはボンドごとにキャッシュするため、PC側の登録解除と再ペアリングが必要になる。
+
+Windows + ChromeのWebHIDデバイス選択画面では、BLE HIDの製品名が表示されない。ChromiumがWindowsで使う`HidD_GetProductString`がBLE HIDに未対応であるためで、デバイス側の設定では解決できない。この環境ではVID/PIDが唯一の識別材料になる。Model Number Stringは他のホストのために保持する。[S8]
 
 ## 5. 双方向同期の状態管理
 
@@ -262,7 +274,7 @@ Windows＋Meetで本体から操作できなければ、BLE直結方式では主
 
 1. ~~WindowsでのBLE Telephony列挙とMeetへの入出力の成立可否。~~ Phase 0で成立を確認（Windows 11＋Chrome＋Meet）。他アプリ・他ブラウザは未確認。
 2. Phone Muteの解釈はPhase 0で状態値方式と確認。最終Report Mapは未確定。
-3. BLE PnP IDとして使用可能なVID/PIDとメーカー識別文字列。
+3. ~~BLE PnP IDとして使用可能なVID/PIDとメーカー識別文字列。~~ V-USB共有ID `0x16C0`/`0x05DF` と識別文字列を§4.4に確定。Windows + Chromeでは製品名が表示されないホスト側の制約も確認済み。
 4. 実機のOS・ブラウザの検証対象バージョン。
 5. BLEボンドと永続化したCCCDを含む共有NVS容量と、UserDemo側の保存領域との衝突有無。
 
@@ -279,3 +291,4 @@ Windows＋Meetで本体から操作できなければ、BLE直結方式では主
 - **[S5]** [Bluetooth SIG HOGP Test Suite](https://files.bluetooth.com/wp-content/uploads/2024/10/HOGP.TS_.p11.pdf) — HID・Device Information・BatteryとPnP IDの検証項目。実装時には採用版の規範仕様も照合する。
 - **[S6]** [V-USB USB-IDs-for-free.txt](https://raw.githubusercontent.com/obdev/v-usb/refs/heads/master/usbdrv/USB-IDs-for-free.txt) — 共有IDの用途と条件。
 - **[S7]** [MaterialDesign](https://github.com/Templarian/MaterialDesign)、[ライセンス](https://github.com/Templarian/MaterialDesign/blob/master/LICENSE) — アイコン候補と利用条件。Google Material Iconsとは区別する。
+- **[S8]** [WebHID: Unknown Device（WICG/webhid#112）](https://github.com/WICG/webhid/issues/112) — WindowsのBLE HIDでChromiumが製品名を取得できない件。`HidD_GetProductString`がBLE HIDに未対応で、Chromium側の対応（`Windows.Devices.Bluetooth`の使用）が必要。Chromium側の追跡は crbug.com/1455500。確認日 2026-09-10、issueはopen。
