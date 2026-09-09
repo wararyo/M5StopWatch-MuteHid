@@ -1,8 +1,96 @@
 # M5StopWatch-MuteHid
 
-M5StopWatchから、Bluetooth HID Telephonyの仕組みを使ってPCの会議アプリのマイクミュートを操作するアプリです。
+M5StopWatchを、BLE HID over GATT（HOGP）のTelephony Deviceとして動かし、PCの会議アプリのマイクミュートを操作・表示するアプリです。  
+PC側に常駐ソフトを入れる必要はありません。
 
-現在は仕様策定段階です。Windows/macOSへのBLE HID接続と、会議アプリの双方向同期は別々に検証します。Google Meetの公式資料ではBluetooth通話コントロールの対応OSがChromeOSに限定されているため、Windows/macOSでの動作は未確認です。
+物理ボタンまたは画面タップでミュートを切り替え、PCが報告してきたミュート状態を画面へ反映します。  
+表示するのは「連携中の会議アプリがHIDへ通知した状態」であり、OSの録音デバイスやマイク本体のスイッチではありません。
+
+## ビルドと書き込み
+
+### このファームウェアのみを書き込む場合
+
+```
+pio run -e m5stopwatch -t upload
+```
+
+### M5StopWatch-UserDemoと共存させる場合
+
+M5StopWatchのFlashにUserDemoとMuteHidを共存させ、再起動で切り替えます。  
+MuteHidはota_1（`0x510000`）だけを使います。  
+なお、UserDemo側にota_1を起動する機能を追加する必要があります。
+
+```
+pio run -e m5stopwatch-coexist            # ビルド
+pio run -e m5stopwatch-coexist -t update  # ビルドしてota_1のみ書き込み
+pio run -e m5stopwatch-coexist -t backup  # 16 MB全体のバックアップ
+```
+
+`-t update` は `tools/device.py` を呼び、シリアルポートと保存済みバックアップを自動で解決します。  
+その後、実機のブートローダ・パーティション表・UserDemo領域がバックアップと一致することを確認してからota_1を書き換えます。
+
+直接叩く場合は次のとおりです。
+
+```
+python tools/device.py update --execute
+```
+
+> **`pio run -t upload` と `-t erase` は使わないでください。** uploadはアプリを `0x10000` から書くためUserDemo（ota_0）を破壊し、eraseはBLEボンドと共有設定を含むNVSごと消します。`tools/upload_guard.py` がこれらのターゲットを停止します。
+
+`update` は既にota_1にMuteHidが入っている場合の更新用で、実機の保護領域だけをバックアップと照合します。初回は `tools/device.py install --execute` を使い、こちらはFlash全体がバックアップと一致することを確認します（`--backup` を省くと16 MBを読み出して新しいバックアップを作ります）。Flashの全消去や共存レイアウトの新規構築は実装していません。
+
+ota_1へ切り替えて起動させるには `--boot` を付けます。付けない場合はotadataを変更せず、書き込みだけを行います。
+
+状態遷移のホストテストは実機なしで動きます。
+
+```
+g++ -std=c++17 -I src tools/test_mute.cpp -o test_mute && ./test_mute
+```
+
+## 操作
+
+| 操作 | 動作 |
+|---|---|
+| KEY.A 短押し | ミュート切り替え要求。`UNKNOWN` のときは絶対値のミュート要求（Input=1） |
+| 中央アイコンのタップ | 同じ切り替え要求 |
+| KEY.B 短押し | 設定画面の開閉 |
+| A+B を3秒保持 | UserDemoへ戻る |
+| KEY.Bを押しながら起動 | 初期化前にUserDemoへ戻る |
+
+30秒無操作で画面が減光します。  
+ボタンは減光中でもそのまま動作しますが、減光を解除した最初のタップはミュート操作になりません。
+
+USBシリアルからの診断コマンド: `a`/`b`＝ボタン相当、`0`/`1`＝生のInput送信、`s`＝状態ログ、`y`/`n`＝ペアリング応答、`u`＝UserDemo復帰、`h`＝ヘルプ。
+
+## 画面
+
+中央にマイクアイコンと状態ラベル、上部に接続を示すドットと電池残量を表示します。  
+ステータスは `MUTED` / `MIC ON` / `UNKNOWN` / `LINKING` / `OFFLINE` の5種類です。
+
+## リポジトリ構成
+
+| パス | 内容 |
+|---|---|
+| `src/app/MuteApp.cpp` | 入力の調停、画面遷移、振動、減光、電池 |
+| `src/domain/MuteState.h` | ホスト報告・反映待ち・接続世代。BLEとUIに依存せず単体でテスト可能 |
+| `src/ble/TelephonyHid.cpp` | GATT、Report Map、接続とボンド、CCCDの永続化 |
+| `src/ui/Renderer.cpp` | 円形レイアウトの描画 |
+| `src/storage/Settings.cpp` | NVS（名前空間 `mutehid`）のアプリ設定 |
+| `src/app/FirmwareSwitch.cpp` | UserDemoへの復帰と起動時の脱出口 |
+| `tools/icons.py` | SVGを8bitアルファマスクへ変換（ビルド時に実行、実行時のSVGパーサーは不要） |
+| `tools/device.py` | バックアップ照合付きのota_1書き込み |
+| `tools/ble_scan.py` / `hid_probe.py` / `serial_probe.py` | 広告の確認、Windows HIDの列挙、シリアルログ取得 |
+| `tools/test_mute.cpp` | 状態遷移のホストテスト |
+
+## ドキュメント
 
 - [アプリ仕様書](docs/specification.md)
+- [Phase 0 検証記録](docs/phase0-results.md)
 - [Google Meetの通話コントロール対応条件](https://support.google.com/meet/answer/12562325?hl=en)
+
+## サードパーティー
+
+アイコンは [Pictogrammers Material Design Icons](https://github.com/Templarian/MaterialDesign) 使用しています。  
+Pictogrammers Material Design Icons は Apache License 2.0 で公開されています。[LICENSE](assets/icons/LICENSE)  
+HIDレポート構成の参考として [push-to-talk-pico](https://github.com/masawada/push-to-talk-pico) を参照しました。
+push-to-talk-pico は MIT ライセンスで公開されています。
