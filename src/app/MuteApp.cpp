@@ -23,7 +23,7 @@ constexpr uint32_t IdleDimMs = 30000;
 constexpr uint32_t NoteMs = 4000;
 constexpr uint32_t ConfirmMs = 5000;
 constexpr uint32_t PairingMs = 30000;
-constexpr uint32_t VibrationMs = 60;
+constexpr uint32_t VibrationMs = 20;
 constexpr uint32_t BatteryMs = 30000;
 constexpr uint32_t ChordMs = 3000;
 // One physical press and the tap it may also produce must not toggle twice.
@@ -54,7 +54,7 @@ void setNote(const char* text) {
 }
 void vibrate() {
     if (!settings.vibration) return;
-    M5.Power.setVibration(160);
+    M5.Power.setVibration(100);
     vibrationUntil = nowMs() + VibrationMs;
 }
 void applyBrightness() {
