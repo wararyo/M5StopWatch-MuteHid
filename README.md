@@ -62,6 +62,8 @@ g++ -std=c++17 -I src tools/test_mute.cpp -o test_mute && ./test_mute
 
 USBシリアルからの診断コマンド: `a`/`b`＝ボタン相当、`0`/`1`＝生のInput送信、`s`＝状態ログ、`y`/`n`＝ペアリング応答、`u`＝UserDemo復帰、`h`＝ヘルプ。
 
+消費電力の測定用コマンド: `p`＝電源の状態を1行出力、`L`/`l`＝その1秒ごとの出力を開始／停止、`D`＝表示の固定状態を切り替え、`A`＝アドバタイズの一時停止、`X`＝固定の解除、`R`/`r`＝電池電圧の記録を開始／停止、`O`＝記録の吸い出し。手順は[省電力化のアイデア集](docs/power-saving-ideas.md)の§4を参照してください。
+
 ## 画面
 
 中央にマイクアイコンと状態ラベル、上部に接続を示すドットと電池残量を表示します。  
@@ -77,15 +79,19 @@ USBシリアルからの診断コマンド: `a`/`b`＝ボタン相当、`0`/`1`�
 | `src/ui/Renderer.cpp` | 円形レイアウトの描画 |
 | `src/storage/Settings.cpp` | NVS（名前空間 `mutehid`）のアプリ設定 |
 | `src/app/FirmwareSwitch.cpp` | UserDemoへの復帰と起動時の脱出口 |
+| `src/app/PowerProbe.cpp` | 消費電力測定用の電圧出力と、電池電圧の記録 |
 | `tools/icons.py` | SVGを8bitアルファマスクへ変換（ビルド時に実行、実行時のSVGパーサーは不要） |
 | `tools/device.py` | バックアップ照合付きのota_1書き込み |
 | `tools/ble_scan.py` / `hid_probe.py` / `serial_probe.py` | 広告の確認、Windows HIDの列挙、シリアルログ取得 |
+| `tools/power_measure.py` | USBテスターを使った状態ごとの消費電力の記録と、電池電圧の記録の吸い出し |
 | `tools/test_mute.cpp` | 状態遷移のホストテスト |
+| `tools/test_device.py` / `test_power_measure.py` | 書き込みツールと測定ツールの単体テスト |
 
 ## ドキュメント
 
 - [アプリ仕様書](docs/specification.md)
 - [Phase 0 検証記録](docs/phase0-results.md)
+- [省電力化のアイデア集と測定手順](docs/power-saving-ideas.md)
 - [Google Meetの通話コントロール対応条件](https://support.google.com/meet/answer/12562325?hl=en)
 
 ## サードパーティー

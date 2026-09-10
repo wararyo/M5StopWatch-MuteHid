@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include "app/FirmwareSwitch.h"
+#include "app/PowerProbe.h"
 #include "ble/TelephonyHid.h"
 #include "domain/MuteState.h"
 #include "esp_app_desc.h"
@@ -26,6 +27,7 @@ constexpr uint32_t PairingMs = 30000;
 constexpr uint32_t VibrationMs = 20;
 constexpr uint32_t BatteryMs = 30000;
 constexpr uint32_t ChordMs = 3000;
+constexpr uint32_t PowerLogMs = 1000;
 // One physical press and the tap it may also produce must not toggle twice.
 constexpr uint32_t ActionGuardMs = 250;
 constexpr int TapSlack = 24;
@@ -46,6 +48,15 @@ int8_t batteryLevel = -1;
 bool charging = false;
 char diagnostics[ui::DiagnosticLines][ui::DiagnosticWidth]{};
 
+// Power-measurement overrides from the serial console. Anything but Normal
+// holds the display in that state: no auto-dim and no wake on input.
+enum class DisplayTest : uint8_t { Normal, Full, Dim, Dark, Sleep, Count };
+constexpr const char* TestNote = "TEST MODE";
+DisplayTest displayTest = DisplayTest::Normal;
+bool advPausedByTest = false, powerLog = false, redraw = false;
+uint32_t powerLogAt = 0;
+uint8_t appliedBrightness = 0;
+
 uint32_t nowMs() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
 
 void setNote(const char* text) {
@@ -57,13 +68,24 @@ void vibrate() {
     M5.Power.setVibration(100);
     vibrationUntil = nowMs() + VibrationMs;
 }
+uint8_t dimLevel() { return settings.level() / 4 > 15 ? settings.level() / 4 : 15; }
+void setBrightness(uint8_t value) {
+    appliedBrightness = value;
+    M5.Display.setBrightness(value);
+}
 void applyBrightness() {
-    M5.Display.setBrightness(dimmed ? (settings.level() / 4 > 15 ? settings.level() / 4 : 15)
-                                    : settings.level());
+    switch (displayTest) {
+    case DisplayTest::Full: setBrightness(settings.level()); return;
+    case DisplayTest::Dim: setBrightness(dimLevel()); return;
+    case DisplayTest::Dark: setBrightness(0); return;
+    case DisplayTest::Sleep: appliedBrightness = 0; return;  // M5.Display.sleep() already dropped it.
+    default: break;
+    }
+    setBrightness(dimmed ? dimLevel() : settings.level());
 }
 void wake() {
     lastInput = nowMs();
-    if (!dimmed) return;
+    if (!dimmed || displayTest != DisplayTest::Normal) return;
     dimmed = false;
     applyBrightness();
 }
@@ -225,6 +247,57 @@ void onTap(int x, int y) {
     }
 }
 
+bool testing() { return displayTest != DisplayTest::Normal || advPausedByTest; }
+bool dimNow() { return displayTest == DisplayTest::Dim || (displayTest == DisplayTest::Normal && dimmed); }
+const char* displayName() {
+    switch (displayTest) {
+    case DisplayTest::Dark: return "dark";
+    case DisplayTest::Sleep: return "sleep";
+    default: return dimNow() ? "dim" : "on";
+    }
+}
+power::Context powerContext() {
+    return {displayName(), dimNow(), displayTest != DisplayTest::Sleep, appliedBrightness,
+            state.connected, telephony::advertisingActive(), testing()};
+}
+void setDisplayTest(DisplayTest next) {
+    const bool wasSleeping = displayTest == DisplayTest::Sleep;
+    displayTest = next;
+    // Leaving or entering a held state starts from undimmed, so the input path
+    // never treats a touch as a wake-up that should be swallowed.
+    dimmed = false;
+    lastInput = nowMs();
+    if (next == DisplayTest::Sleep) {
+        M5.Display.sleep();
+        appliedBrightness = 0;
+    } else {
+        if (wasSleeping) {
+            M5.Display.wakeup();
+            redraw = true;
+        }
+        applyBrightness();
+    }
+    ESP_LOGI(Tag, "TEST display=%s bri=%u", displayName(), appliedBrightness);
+}
+void toggleAdvertisingTest() {
+    if (state.connected) {
+        ESP_LOGW(Tag, "TEST advertising: connected, nothing to pause");
+        return;
+    }
+    advPausedByTest = !advPausedByTest;
+    telephony::pauseAdvertising(advPausedByTest);
+    ESP_LOGI(Tag, "TEST advertising paused=%d", advPausedByTest);
+}
+void clearTests() {
+    if (advPausedByTest) {
+        advPausedByTest = false;
+        telephony::pauseAdvertising(false);
+    }
+    if (displayTest != DisplayTest::Normal) setDisplayTest(DisplayTest::Normal);
+    if (note == TestNote) note = nullptr;
+    ESP_LOGI(Tag, "TEST cleared");
+}
+
 void command(char c) {
     switch (c) {
     case 'a': onButtonA(); break;
@@ -235,8 +308,22 @@ void command(char c) {
     case 'y': if (pairing) onButtonA(); break;
     case 'n': if (pairing) onButtonB(); break;
     case 'u': leaveToUserDemo(); break;
+    case 'p': power::print(power::sample(), powerContext()); break;
+    case 'L': powerLog = true; powerLogAt = nowMs() - PowerLogMs; break;
+    case 'l': powerLog = false; break;
+    case 'D':
+        setDisplayTest(static_cast<DisplayTest>((static_cast<int>(displayTest) + 1) %
+                                                static_cast<int>(DisplayTest::Count)));
+        break;
+    case 'A': toggleAdvertisingTest(); break;
+    case 'X': clearTests(); break;
+    case 'R': power::startRecord(nowMs(), powerContext()); break;
+    case 'r': power::stopRecord(); break;
+    case 'O': power::dump(); break;
     case 'h':
         ESP_LOGI(Tag, "COMMANDS a/b=buttons, 0/1=raw input, s=status, y/n=pairing, u=UserDemo");
+        ESP_LOGI(Tag, "POWER p=sample, L/l=log on/off, D=display step, A=advertising pause, X=clear, "
+                      "R/r=record start/stop, O=dump record");
         break;
     default: break;
     }
@@ -403,6 +490,7 @@ void run() {
         }
         if (confirm && static_cast<int32_t>(now - confirmDeadline) >= 0) confirm = 0;
         if (note && static_cast<int32_t>(now - noteDeadline) >= 0) note = nullptr;
+        if (testing() && !note) setNote(TestNote);
         if (vibrationUntil && static_cast<int32_t>(now - vibrationUntil) >= 0) {
             M5.Power.setVibration(0);
             vibrationUntil = 0;
@@ -411,6 +499,11 @@ void run() {
             batteryAt = now;
             sampleBattery();
         }
+        if (powerLog && now - powerLogAt >= PowerLogMs) {
+            powerLogAt = now;
+            power::print(power::sample(), powerContext());
+        }
+        if (power::recording()) power::tickRecord(now, powerContext());
         if (screen == ui::Screen::Diagnostics && (!diagnosticsAt || now - diagnosticsAt >= 500)) {
             diagnosticsAt = now;
             refreshDiagnostics();
@@ -432,7 +525,7 @@ void run() {
         } else {
             wakeGuard = false;
         }
-        if (!dimmed && now - lastInput >= IdleDimMs) {
+        if (!dimmed && displayTest == DisplayTest::Normal && now - lastInput >= IdleDimMs) {
             dimmed = true;
             applyBrightness();
         }
@@ -492,7 +585,11 @@ void run() {
         view.confirm = confirm;
         view.brightness = settings.percent();
         if (screen == ui::Screen::Diagnostics) std::memcpy(view.diagnostics, diagnostics, sizeof(diagnostics));
-        ui::render(view);
+        // A sleeping panel is not drawn to; the full repaint follows its wake-up.
+        if (displayTest != DisplayTest::Sleep) {
+            ui::render(view, redraw);
+            redraw = false;
+        }
 
         vTaskDelay(pdMS_TO_TICKS(10));
     }

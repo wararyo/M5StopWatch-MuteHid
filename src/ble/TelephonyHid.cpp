@@ -21,6 +21,8 @@ QueueHandle_t events;
 std::atomic<bool> lost{false};
 std::atomic<bool> connected{false}, encrypted{false}, subscribed{false};
 std::atomic<bool> numericPending{false}, stopping{false};
+// Measurement-only pause; unlike `stopping` it keeps the link and can be undone.
+std::atomic<bool> advPaused{false}, advertisingNow{false};
 std::atomic<uint32_t> generation{0};
 esp_hidd_dev_t* device = nullptr;
 esp_gatt_if_t hidIf = ESP_GATT_IF_NONE;
@@ -50,7 +52,7 @@ void emit(telephony::Kind kind, uint32_t value = 0, uint16_t len = 0, uint16_t i
     if (xQueueSend(events, &e, 0) != pdTRUE) lost.store(true);
 }
 void advertise() {
-    if (advDataReady && scanReady && serviceReady && !connected && !stopping) {
+    if (advDataReady && scanReady && serviceReady && !connected && !stopping && !advPaused) {
         const auto err = esp_ble_gap_start_advertising(&advertising);
         ESP_LOGI(Tag, "ADV request=%s", esp_err_to_name(err));
     }
@@ -128,7 +130,11 @@ void gap(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* p) {
     case ESP_GAP_BLE_SCAN_RSP_DATA_SET_COMPLETE_EVT:
         scanReady = p->scan_rsp_data_cmpl.status == ESP_BT_STATUS_SUCCESS; advertise(); break;
     case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
+        advertisingNow = p->adv_start_cmpl.status == ESP_BT_STATUS_SUCCESS;
         ESP_LOGI(Tag, "ADV started status=%d", p->adv_start_cmpl.status); break;
+    case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
+        if (p->adv_stop_cmpl.status == ESP_BT_STATUS_SUCCESS) advertisingNow = false;
+        ESP_LOGI(Tag, "ADV stopped status=%d", p->adv_stop_cmpl.status); break;
     case ESP_GAP_BLE_SEC_REQ_EVT:
         esp_ble_gap_security_rsp(p->ble_security.ble_req.bd_addr, allowedPeer(p->ble_security.ble_req.bd_addr)); break;
     case ESP_GAP_BLE_NC_REQ_EVT:
@@ -176,6 +182,7 @@ void gatts(esp_gatts_cb_event_t event, esp_gatt_if_t iface, esp_ble_gatts_cb_par
             connectionId = p->connect.conn_id;
             std::memcpy(peer, p->connect.remote_bda, 6);
             connected = true; encrypted = false; subscribed = false;
+            advertisingNow = false;  // The controller ends advertising on connection.
             ESP_LOGI(Tag, "CONNECT generation=%lu", (unsigned long)generation.load());
             emit(telephony::Kind::Connected);
         }
@@ -361,6 +368,12 @@ void forget() {
     clearSubscription();
     subscribed = false;
 }
+void pauseAdvertising(bool pause) {
+    advPaused = pause;
+    if (pause) esp_ble_gap_stop_advertising();
+    else advertise();
+}
+bool advertisingActive() { return advertisingNow; }
 void stop() { stopping = true; esp_ble_gap_stop_advertising(); if (connected) esp_ble_gap_disconnect(peer); }
 // Drops the link but keeps advertising, so a new host can pair afterwards.
 void disconnectPeer() { if (connected) esp_ble_gap_disconnect(peer); }

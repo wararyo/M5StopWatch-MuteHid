@@ -16,5 +16,8 @@ void disconnectPeer();
 int bonds();
 bool peerText(char* out, unsigned size);
 void battery(uint8_t level);
+// Power measurement: hold advertising off without dropping the link or bond.
+void pauseAdvertising(bool pause);
+bool advertisingActive();
 }
 
