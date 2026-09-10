@@ -94,6 +94,8 @@ push-to-talk-picoの`src/usb_descriptors.c`と`src/main.c`を確認した。以�
 
 Outputの実測値は`0x02`／`0x03`で、bit 0がミュート、bit 1（Off-Hook）は会議参加中に1だった。会議参加直後は`0x00`に続いて`0x02`が届いた。この初期通知は会議参加時にだけ観測されたものであり、接続だけで現在値が得られる根拠にはしない。
 
+2026-09-10のmacOS実測では、ホストがOutput characteristicへ**Report IDを前置した2バイト**（`01 01`、`01 02`、`01 03`）を書き込んだ。BLE HIDではReport IDはReport Reference記述子側のメタデータであり、Windowsはペイロード1バイトだけを書く。ペイロードの意味はWindowsと同じでbit 0がミュート、bit 1がOff-Hookだった。本体は1バイトと「Report ID＋1バイト」の両方を受け付け、状態にはペイロードだけを渡す。長さだけで弾くと受信経路が丸ごと無言で失われるため、この差はホストごとに確認する。
+
 ### 4.4 VID/PID
 
 BLEでもDevice InformationのPnP IDを設計対象とする。「USB端子を使わないのでVID/PIDは不要」とは決めない。USB VID由来の値を使う場合、Vendor ID SourceはUSB-IFを示す`0x02`とし、Bluetooth SIGのCompany Identifierと混同しない。採用するHOGP版とESP-IDF実装に照らして検証する。[S5]

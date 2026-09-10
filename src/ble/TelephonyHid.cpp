@@ -202,8 +202,13 @@ void gatts(esp_gatts_cb_event_t event, esp_gatt_if_t iface, esp_ble_gatts_cb_par
                 saveSubscription(peer, static_cast<uint16_t>(w.value[0] | (w.value[1] << 8)));
                 emit(telephony::Kind::Subscribe, subscribed ? 1 : 0);
             } else if (w.handle == outputHandle) {
-                ESP_LOGI(Tag, "OUTPUT id=1 len=%u value=0x%02x", w.len, w.value[0]);
-                if (encrypted && w.len == 1) emit(telephony::Kind::Output, w.value[0], w.len, telephony::ReportId);
+                // Report ID is metadata on GATT, but macOS prefixes it to the
+                // payload anyway; Windows writes the payload alone. Accept both
+                // shapes and pass only the payload byte on.
+                const bool prefixed = w.len == 2 && w.value[0] == telephony::ReportId;
+                const uint8_t value = prefixed ? w.value[1] : w.value[0];
+                ESP_LOGI(Tag, "OUTPUT id=1 len=%u prefixed=%d value=0x%02x", w.len, (int)prefixed, value);
+                if (encrypted && (w.len == 1 || prefixed)) emit(telephony::Kind::Output, value, 1, telephony::ReportId);
             } else if (w.handle == controlHandle && w.len == 1) emit(telephony::Kind::Control, w.value[0]);
             else if (w.handle == protocolHandle && w.len == 1) emit(telephony::Kind::Protocol, w.value[0]);
         }
