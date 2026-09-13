@@ -20,7 +20,9 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(pm.parse_drain("DRAIN t=60 vbat=4100 st=5"), {"t": 60, "vbat": 4100, "st": 5})
 
     def test_drain_control_lines(self):
-        for line in ("DRAIN end n=12", "DRAIN start interval=60s capacity=1440", "DRAIN stop n=3", "DRAIN t=60"):
+        for line in ("DRAIN end n=12", "DRAIN start interval=60s capacity=1440 nvs_interval=300s nvs_capacity=96",
+                     "DRAIN stop n=3 nvs_n=1", "DRAIN source=nvs interval=300s", "DRAIN nvs_error=ESP_FAIL",
+                     "DRAIN t=60"):
             self.assertIsNone(pm.parse_drain(line), line)
 
     def test_describe_state(self):
