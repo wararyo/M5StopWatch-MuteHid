@@ -17,29 +17,40 @@ pio run -e m5stopwatch -t upload
 ### M5StopWatch-UserDemoと共存させる場合
 
 M5StopWatchのFlashにUserDemoとMuteHidを共存させ、再起動で切り替えます。  
-MuteHidはota_1（`0x510000`）だけを使います。  
-なお、UserDemo側にota_1を起動する機能を追加する必要があります。
+UserDemo＋追加アプリ3本の配置に対応しています。  
+UserDemo側もApp1〜App3を起動できるバージョンを使用する必要があります。
+
+| 選択 | 書き込み先 | 容量 |
+|---|---|---|
+| `--slot 1`（既定） | ota_1 / `0x510000` | `0x190000`（1,638,400 bytes） |
+| `--slot 2` | ota_2 / `0x6A0000` | 同上 |
+| `--slot 3` | ota_3 / `0x830000` | 同上 |
+
+同じファームウェアをどのスロットにも配置できます。
 
 ```
 pio run -e m5stopwatch-coexist            # ビルド
-pio run -e m5stopwatch-coexist -t update  # ビルドしてota_1のみ書き込み
+pio run -e m5stopwatch-coexist -t update  # ビルドして選択スロットのみ書き込み
 pio run -e m5stopwatch-coexist -t backup  # 16 MB全体のバックアップ
 ```
 
 `-t update` は `tools/device.py` を呼び、シリアルポートと保存済みバックアップを自動で解決します。  
-その後、実機のブートローダ・パーティション表・UserDemo領域がバックアップと一致することを確認してからota_1を書き換えます。
+その後、実機のブートローダ・パーティション表・UserDemo領域がバックアップと一致することを確認してから選択スロットを書き換えます。
+`-t update` の対象は `platformio.ini` の `custom_app_slot = 1` を `2` または `3` に変更して選びます。
 
 直接叩く場合は次のとおりです。
 
 ```
-python tools/device.py update --execute
+python tools/device.py update --slot 2 --execute
 ```
 
 > **共存させる場合、`pio run -t upload` と `-t erase` は使わないでください。** uploadはアプリを `0x10000` から書くためUserDemo（ota_0）を破壊し、eraseはBLEボンドと共有設定を含むNVSごと消します。`tools/upload_guard.py` が共存env（`m5stopwatch-coexist`）でこれらのターゲットを停止します。単独env（`m5stopwatch`）では、デバイス全体をMuteHid専用にする前提でuploadを許可しています。
 
-`update` は既にota_1にMuteHidが入っている場合の更新用で、実機の保護領域だけをバックアップと照合します。初回は `tools/device.py install --execute` を使い、こちらはFlash全体がバックアップと一致することを確認します（`--backup` を省くと16 MBを読み出して新しいバックアップを作ります）。Flashの全消去や共存レイアウトの新規構築は実装していません。
+`update` は選択スロットに既にMuteHidが入っている場合の更新用で、実機の保護領域だけをバックアップと照合します。初回は `python tools/device.py install --slot 2 --execute` を使い、こちらはFlash全体がバックアップと一致することを確認します（`--backup` を省くと16 MBを読み出して新しいバックアップを作ります）。他アプリが使っていないスロットを選んでください。Flashの全消去や共存レイアウトの新規構築は実装していません。
 
-ota_1へ切り替えて起動させるには `--boot` を付けます。付けない場合はotadataを変更せず、書き込みだけを行います。
+旧2本構成の実機は、そのままでは更新できません。先にVibe Watchの[共存手順](../vibewatch/docs/coexistence.md)に従い、新しいUserDemoとパーティション表を導入してください。この移行ではNVSと起動先が初期化されるため、追加アプリの再書き込みとBLEの再ペアリングが必要です。移行後のバックアップを使ってMuteHidを `install` してください。複数のバックアップがある場合は `--backup` で指定します。
+
+選択スロットへ切り替えて起動させるには `--boot` を付けます。付けない場合はotadataを変更せず、書き込みだけを行います。他スロットとNVS、storageは保持します。
 
 状態遷移のホストテストは実機なしで動きます。
 
@@ -81,7 +92,7 @@ USBシリアルからの診断コマンド: `a`/`b`＝ボタン相当、`0`/`1`�
 | `src/app/FirmwareSwitch.cpp` | UserDemoへの復帰と起動時の脱出口 |
 | `src/app/PowerProbe.cpp` | 消費電力測定用の電圧出力と、電池電圧の記録 |
 | `tools/icons.py` | SVGを8bitアルファマスクへ変換（ビルド時に実行、実行時のSVGパーサーは不要） |
-| `tools/device.py` | バックアップ照合付きのota_1書き込み |
+| `tools/device.py` | バックアップ照合付きの選択スロット書き込み |
 | `tools/ble_scan.py` / `hid_probe.py` / `serial_probe.py` | 広告の確認、Windows HIDの列挙、シリアルログ取得 |
 | `tools/power_measure.py` | USBテスターを使った状態ごとの消費電力の記録と、電池電圧の記録の吸い出し |
 | `tools/test_mute.cpp` | 状態遷移のホストテスト |

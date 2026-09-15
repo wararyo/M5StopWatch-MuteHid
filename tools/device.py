@@ -1,4 +1,4 @@
-"""Read/backup the StopWatch, or install only ota_1 after a full backup.
+"""Read/backup the StopWatch, or install a selected app slot after a full backup.
 
 Normal writes preserve UserDemo, NVS, storage and partition table. --boot changes
 only otadata as well. No full erase/initial-layout installation is implemented.
@@ -15,12 +15,14 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SIZE = 0x1000000
-SLOT = 0x510000
-SLOT_SIZE = 0x4F0000
+SLOT_OFFSETS = {1: 0x510000, 2: 0x6A0000, 3: 0x830000}
+SLOT_SIZE = 0x190000
 EXPECTED = {
     "nvs": (1, 2, 0x9000, 0x4000), "otadata": (1, 0, 0xD000, 0x2000),
-    "phy_init": (1, 1, 0xF000, 0x1000), "ota_0": (0, 16, 0x20000, SLOT_SIZE),
-    "ota_1": (0, 17, SLOT, SLOT_SIZE), "storage": (1, 129, 0xA00000, 0x400000),
+    "phy_init": (1, 1, 0xF000, 0x1000), "ota_0": (0, 16, 0x20000, 0x4F0000),
+    "ota_1": (0, 17, SLOT_OFFSETS[1], SLOT_SIZE),
+    "ota_2": (0, 18, SLOT_OFFSETS[2], SLOT_SIZE),
+    "ota_3": (0, 19, SLOT_OFFSETS[3], SLOT_SIZE), "storage": (1, 129, 0xA00000, 0x400000),
     "coredump": (1, 3, 0xE00000, 0x10000),
 }
 
@@ -94,11 +96,14 @@ def main():
     p.add_argument("--baud", type=int, default=1500000)
     p.add_argument("--firmware", type=Path, default=ROOT / ".pio/build/m5stopwatch-coexist/firmware.bin")
     p.add_argument("--esptool", type=Path, default=Path.home() / ".platformio/packages/tool-esptoolpy/esptool.py")
-    p.add_argument("--boot", action="store_true", help="Also select ota_1 after successful verification")
+    p.add_argument("--slot", type=int, choices=sorted(SLOT_OFFSETS), default=1,
+                   help="App slot to write (default: 1)")
+    p.add_argument("--boot", action="store_true", help="Also boot the selected slot after successful verification")
     p.add_argument("--backup", type=Path,
                    help="Full backup to verify against; the stored one is used when omitted")
     p.add_argument("--execute", action="store_true")
     args = p.parse_args()
+    slot = SLOT_OFFSETS[args.slot]
     if not args.esptool.exists():
         raise ValueError(f"No esptool.py at {args.esptool}; pass --esptool")
     args.port = args.port or detect_port()
@@ -111,7 +116,7 @@ def main():
         if not (0 < len(fw) <= SLOT_SIZE) or app_name(fw) != "M5StopWatch-MuteHid":
             raise ValueError("Not a fitting MuteHid firmware")
         check_table(args.firmware.with_name("partitions.bin").read_bytes())
-        print(f"PLAN: verify original backup; write {len(fw)} bytes to ota_1 at 0x510000; boot={args.boot}")
+        print(f"PLAN: verify original backup; write {len(fw)} bytes to ota_{args.slot} at 0x{slot:x}; boot={args.boot}")
         if not args.execute:
             print("DRY RUN. Add --execute to back up and write the device.")
             return
@@ -141,7 +146,7 @@ def main():
             userdemo.write_bytes(data[0x20000:0x510000])
             run("--after", "no_reset", "verify_flash", "0", protected, "0x20000", userdemo)
             current = directory / f"current-app-{stamp}.bin"
-            run("--after", "no_reset", "read_flash", hex(SLOT), "0x1000", current)
+            run("--after", "no_reset", "read_flash", hex(slot), "0x1000", current)
             if app_name(current.read_bytes()) != "M5StopWatch-MuteHid":
                 raise ValueError("update only replaces an existing MuteHid image")
         else:
@@ -150,19 +155,21 @@ def main():
         backup.with_suffix(".sha256").write_text(sha + "\n")
     check_table(data[0x8000:0x9000])
     info = {"backup": str(backup), "sha256": sha, "bytes": len(data),
-            "ota_0": app_name(data[0x20000:]), "ota_1": app_name(data[SLOT:]), "port": args.port}
+            "ota_0": app_name(data[0x20000:]),
+            **{f"ota_{number}": app_name(data[offset:]) for number, offset in SLOT_OFFSETS.items()},
+            "port": args.port}
     backup.with_suffix(".json").write_text(json.dumps(info, indent=2) + "\n")
     print(json.dumps(info, indent=2))
     if args.action == "backup":
         run("run")
         return
     if info["ota_0"] != "StopWatch-UserDemo":
-        raise ValueError("UserDemo not found; refusing to overwrite ota_1")
-    run("--after", "no_reset", "write_flash", "--flash_mode", "dio", "--flash_freq", "80m", "--flash_size", "16MB", hex(SLOT), args.firmware)
-    run("--after", "no_reset", "verify_flash", hex(SLOT), args.firmware)
+        raise ValueError("UserDemo not found; refusing to overwrite the selected app slot")
+    run("--after", "no_reset", "write_flash", "--flash_mode", "dio", "--flash_freq", "80m", "--flash_size", "16MB", hex(slot), args.firmware)
+    run("--after", "no_reset", "verify_flash", hex(slot), args.firmware)
     if args.boot:
         selection = directory / f"boot-mutehid-{stamp}.bin"
-        selection.write_bytes(ota_selection(1))
+        selection.write_bytes(ota_selection(args.slot))
         run("write_flash", "0xd000", selection)
     else:
         run("run")
