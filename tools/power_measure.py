@@ -218,7 +218,7 @@ def measure(args):
     reader = Reader(port, args.echo)
     reader.start()
     columns = ["time", "id", "scenario", "mA", "vbus_mV", "mW", "vbat_mV", "disp", "bri", "conn", "adv",
-               "cpu", "firmware"]
+               "cpu", "ext", "firmware"]
     try:
         send(port, "XL")
         time.sleep(2)
@@ -248,7 +248,7 @@ def measure(args):
                     continue
                 out.writerow([datetime.datetime.now().isoformat(timespec="seconds"), sid, label, ma, vbus,
                               round(milliwatts(ma, vbus), 1) if vbus else "", vbat, last.get("disp"),
-                              last.get("bri"), last.get("conn"), last.get("adv"), last.get("cpu"), version])
+                              last.get("bri"), last.get("conn"), last.get("adv"), last.get("cpu"), last.get("ext"), version])
                 f.flush()
     finally:
         try:

@@ -12,6 +12,7 @@ struct Sample {
     int8_t level;        // Percent derived from vbat, -1 when unknown.
     bool charging;
     int cpuMhz;
+    bool ext;            // PMIC 5 V boost for Grove.
 };
 
 // Device state that decides the draw, supplied by the app task.

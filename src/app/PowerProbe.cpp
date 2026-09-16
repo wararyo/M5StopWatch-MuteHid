@@ -100,13 +100,14 @@ Sample sample() {
     s.level = static_cast<int8_t>(M5.Power.getBatteryLevel());
     s.charging = M5.Power.isCharging() == m5::Power_Class::is_charging_t::is_charging;
     s.cpuMhz = esp_clk_cpu_freq() / 1000000;
+    s.ext = M5.Power.getExtOutput();
     return s;
 }
 
 void print(const Sample& s, const Context& c) {
-    std::printf("PWR t=%lu vbat=%d vbus=%d lvl=%d chg=%d disp=%s bri=%u conn=%d adv=%d cpu=%d hold=%d rec=%d\n",
+    std::printf("PWR t=%lu vbat=%d vbus=%d lvl=%d chg=%d disp=%s bri=%u conn=%d adv=%d cpu=%d ext=%d hold=%d rec=%d\n",
                 (unsigned long)s.ms, s.vbat, s.vbus, s.level, s.charging, c.display, c.brightness,
-                c.connected, c.advertising, s.cpuMhz, c.hold, active);
+                c.connected, c.advertising, s.cpuMhz, s.ext, c.hold, active);
     std::fflush(stdout);
 }
 

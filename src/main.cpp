@@ -22,6 +22,8 @@ extern "C" void app_main() {
     firmware::checkStartupEscape();
     auto cfg = M5.config();
     cfg.internal_imu = cfg.internal_rtc = cfg.internal_mic = cfg.internal_spk = false;
+    // Nothing is attached to Grove; the PMIC's 5 V boost only costs battery.
+    cfg.output_power = false;
     M5.begin(cfg);
     M5.Display.setBrightness(90);
     ESP_LOGI("Boot", "BOOT %s %s IDF=%s", esp_app_get_description()->project_name,
