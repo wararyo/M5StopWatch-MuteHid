@@ -28,6 +28,7 @@ constexpr uint32_t VibrationMs = 20;
 constexpr uint32_t BatteryMs = 30000;
 constexpr uint32_t ChordMs = 3000;
 constexpr uint32_t PowerLogMs = 1000;
+constexpr uint32_t UsbCheckMs = 1000;
 // One physical press and the tap it may also produce must not toggle twice.
 constexpr uint32_t ActionGuardMs = 250;
 constexpr int TapSlack = 24;
@@ -54,7 +55,7 @@ enum class DisplayTest : uint8_t { Normal, Full, Dim, Dark, Sleep, Count };
 constexpr const char* TestNote = "TEST MODE";
 DisplayTest displayTest = DisplayTest::Normal;
 bool advPausedByTest = false, powerLog = false, redraw = false;
-uint32_t powerLogAt = 0;
+uint32_t powerLogAt = 0, usbCheckAt = 0;
 uint8_t appliedBrightness = 0;
 
 uint32_t nowMs() { return static_cast<uint32_t>(esp_timer_get_time() / 1000); }
@@ -494,6 +495,10 @@ void run() {
         if (vibrationUntil && static_cast<int32_t>(now - vibrationUntil) >= 0) {
             M5.Power.setVibration(0);
             vibrationUntil = 0;
+        }
+        if (!usbCheckAt || now - usbCheckAt >= UsbCheckMs) {
+            usbCheckAt = now;
+            power::updateSleepLock(M5.Power.getVBUSVoltage());
         }
         if (!batteryAt || now - batteryAt >= BatteryMs) {
             batteryAt = now;

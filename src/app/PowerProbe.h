@@ -23,6 +23,13 @@ struct Context {
     bool connected, advertising, hold;
 };
 
+// Automatic light sleep stops the USB Serial/JTAG peripheral, which kills the
+// console and, with it, flashing and the measurement tooling. Hold a lock while
+// USB power is present so the device only sleeps on battery. Call regularly with
+// a fresh VBUS reading.
+void updateSleepLock(int16_t vbusMv);
+bool sleepLockHeld();
+
 // Reads the PMIC over I2C; call from the task that owns M5Unified.
 Sample sample();
 // One "PWR key=value ..." line on stdout, independent of the log level.

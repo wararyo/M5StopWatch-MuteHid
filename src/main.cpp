@@ -3,9 +3,11 @@
 #include <unistd.h>
 #include "app/FirmwareSwitch.h"
 #include "app/MuteApp.h"
+#include "app/PowerProbe.h"
 #include "ble/TelephonyHid.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "nvs_flash.h"
 
 namespace {
@@ -28,6 +30,21 @@ extern "C" void app_main() {
     M5.Display.setBrightness(90);
     ESP_LOGI("Boot", "BOOT %s %s IDF=%s", esp_app_get_description()->project_name,
              esp_app_get_description()->version, esp_app_get_description()->idf_ver);
+
+    // Automatic light sleep while idle; the BT controller's modem sleep keeps the
+    // connection alive on the main crystal. No DFS: the clock is already fixed at
+    // CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, so min and max are the same.
+    esp_pm_config_t pm = {
+        .max_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+        .min_freq_mhz = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ,
+        .light_sleep_enable = true,
+    };
+    const auto pmErr = esp_pm_configure(&pm);
+    if (pmErr != ESP_OK) {
+        ESP_LOGW("Boot", "PM configure: %s", esp_err_to_name(pmErr));
+    }
+    // Take the lock before anything can sleep: light sleep kills the USB console.
+    power::updateSleepLock(M5.Power.getVBUSVoltage());
 
     const auto nvsErr = nvs_flash_init();
     if (nvsErr != ESP_OK) {

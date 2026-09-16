@@ -2,6 +2,8 @@
 #include <M5Unified.h>
 #include <cstdio>
 #include "esp_err.h"
+#include "esp_pm.h"
+#include "esp_system.h"
 #include "esp_private/esp_clk.h"
 #include "esp_timer.h"
 #include "nvs.h"
@@ -11,6 +13,8 @@ constexpr uint32_t RecordIntervalMs = 60000;
 constexpr int Capacity = 24 * 60;
 // VBUS above this means USB power is present, so the battery is not the source.
 constexpr int16_t UsbPresentMv = 4000;
+// True while the no-light-sleep lock is held for the USB console.
+bool sleepLocked = false;
 
 // A coarser copy of the record survives the battery running flat. It is one
 // fixed-size blob in the app's namespace, which it shares with the settings
@@ -92,6 +96,20 @@ void persist(const power::Sample& s, uint8_t state) {
 
 namespace power {
 
+void updateSleepLock(int16_t vbusMv) {
+    static esp_pm_lock_handle_t lock = nullptr;
+    if (lock == nullptr &&
+        esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "usb-console", &lock) != ESP_OK) {
+        return;
+    }
+    const bool usb = vbusMv > UsbPresentMv;
+    if (usb == sleepLocked) return;
+    if ((usb ? esp_pm_lock_acquire(lock) : esp_pm_lock_release(lock)) != ESP_OK) return;
+    sleepLocked = usb;
+}
+
+bool sleepLockHeld() { return sleepLocked; }
+
 Sample sample() {
     Sample s{};
     s.ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
@@ -105,9 +123,9 @@ Sample sample() {
 }
 
 void print(const Sample& s, const Context& c) {
-    std::printf("PWR t=%lu vbat=%d vbus=%d lvl=%d chg=%d disp=%s bri=%u conn=%d adv=%d cpu=%d ext=%d hold=%d rec=%d\n",
+    std::printf("PWR t=%lu vbat=%d vbus=%d lvl=%d chg=%d disp=%s bri=%u conn=%d adv=%d cpu=%d ext=%d slp=%d rst=%d hold=%d rec=%d\n",
                 (unsigned long)s.ms, s.vbat, s.vbus, s.level, s.charging, c.display, c.brightness,
-                c.connected, c.advertising, s.cpuMhz, s.ext, c.hold, active);
+                c.connected, c.advertising, s.cpuMhz, s.ext, !sleepLocked, (int)esp_reset_reason(), c.hold, active);
     std::fflush(stdout);
 }
 
