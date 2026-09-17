@@ -18,6 +18,7 @@
 namespace {
 constexpr const char* Tag = "Telephony";
 QueueHandle_t events;
+std::atomic<TaskHandle_t> waiter{nullptr};
 std::atomic<bool> lost{false};
 std::atomic<bool> connected{false}, encrypted{false}, subscribed{false};
 std::atomic<bool> numericPending{false}, stopping{false};
@@ -50,6 +51,7 @@ uint8_t characteristicReadable = ESP_GATT_CHAR_PROP_BIT_READ;
 void emit(telephony::Kind kind, uint32_t value = 0, uint16_t len = 0, uint16_t id = 0) {
     telephony::Event e{kind, generation.load(), value, len, id};
     if (xQueueSend(events, &e, 0) != pdTRUE) lost.store(true);
+    if (const auto task = waiter.load()) xTaskNotifyGive(task);
 }
 void advertise() {
     if (advDataReady && scanReady && serviceReady && !connected && !stopping && !advPaused) {
@@ -347,6 +349,7 @@ esp_err_t begin() {
     return ESP_OK;
 }
 bool poll(Event& e) { return events && xQueueReceive(events, &e, 0) == pdTRUE; }
+void setWaiter(TaskHandle_t task) { waiter.store(task); }
 bool overflowed() { return lost.exchange(false); }
 esp_err_t send(uint8_t value) {
     if (!connected || !encrypted || !subscribed || !inputHandle || stopping) return ESP_ERR_INVALID_STATE;

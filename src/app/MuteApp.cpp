@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include "app/FirmwareSwitch.h"
+#include "app/InputWake.h"
 #include "app/PowerProbe.h"
 #include "ble/TelephonyHid.h"
 #include "domain/MuteState.h"
@@ -29,6 +30,12 @@ constexpr uint32_t BatteryMs = 30000;
 constexpr uint32_t ChordMs = 3000;
 constexpr uint32_t PowerLogMs = 1000;
 constexpr uint32_t UsbCheckMs = 1000;
+// Loop period. Fast while input is active or recent, so press, drag and chord
+// timing stay as before; slow when idle, relying on input_wake and the BLE event
+// notification to cut the wait short.
+constexpr uint32_t FastMs = 10;
+constexpr uint32_t IdleMs = 100;
+constexpr uint32_t ActiveMs = 1000;
 // One physical press and the tap it may also produce must not toggle twice.
 constexpr uint32_t ActionGuardMs = 250;
 constexpr int TapSlack = 24;
@@ -447,6 +454,10 @@ void run() {
     command('h');
     status();
 
+    const auto self = xTaskGetCurrentTaskHandle();
+    telephony::setWaiter(self);
+    input_wake::begin(self);
+
     bool aSeen = false, bSeen = false, chord = false, holding = false;
     uint32_t heldSince = 0;
 
@@ -596,7 +607,12 @@ void run() {
             redraw = false;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        // USB keeps the fast period too: the device does not sleep then, and the
+        // serial tooling expects prompt answers.
+        const bool busy = a || b || touching || now - lastInput < ActiveMs || vibrationUntil ||
+                          power::sleepLockHeld();
+        input_wake::rearm();
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(busy ? FastMs : IdleMs));
     }
 }
 
