@@ -36,8 +36,8 @@ Sample sample();
 void print(const Sample& sample, const Context& context);
 
 // Battery-voltage record for runs on battery: one entry a minute in RAM,
-// keeping the latest 24 hours, plus one every 5 minutes in NVS for the first
-// 8 hours. Plugging USB back in does not reset the chip, so the RAM record
+// keeping the latest 24 hours, plus one every 15 minutes in NVS for the first
+// 32 hours. Plugging USB back in does not reset the chip, so the RAM record
 // survives until it is dumped as "DRAIN" lines; if the battery ran flat, the
 // dump falls back to the NVS copy. Starting a record clears both.
 void startRecord(uint32_t now, const Context& context);

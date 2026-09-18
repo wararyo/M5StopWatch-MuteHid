@@ -18,9 +18,10 @@ bool sleepLocked = false;
 
 // A coarser copy of the record survives the battery running flat. It is one
 // fixed-size blob in the app's namespace, which it shares with the settings
-// and the CCC record, so it stays small: 8 hours at 5-minute steps.
-constexpr uint32_t PersistIntervalMs = 5 * 60000;
-constexpr int PersistCapacity = 8 * 12;
+// and the CCC record, so it stays small: 32 hours at 15-minute steps, which
+// outlasts the estimated 24-hour battery life with margin to spare.
+constexpr uint32_t PersistIntervalMs = 15 * 60000;
+constexpr int PersistCapacity = 32 * 4;
 constexpr const char* Namespace = "mutehid";
 constexpr const char* PersistKey = "pwr_drain";
 constexpr uint16_t PersistVersion = 1;
@@ -86,7 +87,7 @@ bool loadPersisted(Persisted& out) {
 }
 
 void persist(const power::Sample& s, uint8_t state) {
-    if (persisted.count >= PersistCapacity) return;  // Keep the first 8 hours.
+    if (persisted.count >= PersistCapacity) return;  // Keep the first 32 hours.
     persisted.vbat[persisted.count] = s.vbat;
     persisted.state[persisted.count] = state;
     ++persisted.count;
