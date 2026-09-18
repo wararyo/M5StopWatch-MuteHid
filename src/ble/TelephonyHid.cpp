@@ -53,6 +53,26 @@ void emit(telephony::Kind kind, uint32_t value = 0, uint16_t len = 0, uint16_t i
     if (xQueueSend(events, &e, 0) != pdTRUE) lost.store(true);
     if (const auto task = waiter.load()) xTaskNotifyGive(task);
 }
+// Idea 1 in docs/power-saving-ideas.md: the host starts us at a 15 ms interval
+// with no latency, so the radio wakes 67 times a second. Ask for a longer
+// interval and a slave latency; our own reports still go out at the next
+// connection event, only host->device output can lag by (latency+1) intervals.
+// Units: interval 1.25 ms, timeout 10 ms. Intervals are multiples of 15 ms for
+// Apple hosts. The host may refuse or amend this; CONN_PARAMS logs the outcome.
+void requestSlowLink() {
+    esp_ble_conn_update_params_t params{};
+    std::memcpy(params.bda, peer, 6);
+    params.min_int = 24;   // 30 ms
+    params.max_int = 36;   // 45 ms
+    // Host->device output may lag (latency+1) * max_int = 225 ms. macOS accepts
+    // this, then re-applies its own 15 ms interval with latency 4 regardless of
+    // what was asked (tried 14: same outcome), so the value matters for other
+    // hosts only.
+    params.latency = 4;
+    params.timeout = 400;  // 4 s
+    const auto err = esp_ble_gap_update_conn_params(&params);
+    ESP_LOGI(Tag, "CONN_UPDATE request=%s", esp_err_to_name(err));
+}
 void advertise() {
     if (advDataReady && scanReady && serviceReady && !connected && !stopping && !advPaused) {
         const auto err = esp_ble_gap_start_advertising(&advertising);
@@ -155,8 +175,17 @@ void gap(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* p) {
         ESP_LOGI(Tag, "AUTH success=%d reason=0x%02x mode=0x%02x bonds=%d", (int)encrypted.load(),
                  p->ble_security.auth_cmpl.fail_reason, p->ble_security.auth_cmpl.auth_mode, esp_ble_get_bond_device_num());
         emit(telephony::Kind::Auth, encrypted ? 1 : 0);
-        if (encrypted) restoreSubscription(p->ble_security.auth_cmpl.bd_addr);
-        else esp_ble_gap_disconnect(peer);
+        if (encrypted) {
+            restoreSubscription(p->ble_security.auth_cmpl.bd_addr);
+            requestSlowLink();
+        } else {
+            esp_ble_gap_disconnect(peer);
+        }
+        break;
+    case ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT:
+        ESP_LOGI(Tag, "CONN_PARAMS status=%d interval=%u latency=%u timeout=%u",
+                 p->update_conn_params.status, p->update_conn_params.conn_int,
+                 p->update_conn_params.latency, p->update_conn_params.timeout);
         break;
     case ESP_GAP_BLE_REMOVE_BOND_DEV_COMPLETE_EVT:
         ESP_LOGI(Tag, "BOND remove status=%d remaining=%d", p->remove_bond_dev_cmpl.status, esp_ble_get_bond_device_num()); break;
@@ -185,7 +214,11 @@ void gatts(esp_gatts_cb_event_t event, esp_gatt_if_t iface, esp_ble_gatts_cb_par
             std::memcpy(peer, p->connect.remote_bda, 6);
             connected = true; encrypted = false; subscribed = false;
             advertisingNow = false;  // The controller ends advertising on connection.
-            ESP_LOGI(Tag, "CONNECT generation=%lu", (unsigned long)generation.load());
+            // Interval in 1.25 ms units, timeout in 10 ms units: what the host
+            // chose decides how often the controller must wake (idea 1).
+            ESP_LOGI(Tag, "CONNECT generation=%lu interval=%u latency=%u timeout=%u",
+                     (unsigned long)generation.load(), p->connect.conn_params.interval,
+                     p->connect.conn_params.latency, p->connect.conn_params.timeout);
             emit(telephony::Kind::Connected);
         }
         if (event == ESP_GATTS_DISCONNECT_EVT) {
